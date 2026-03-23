@@ -1,17 +1,6 @@
 <?php
 declare(strict_types=1);
 
-/**
- * UrbanHub - index.php
- * Dépôt attendu :
- * php/index.php
- * php/logo.webp
- *
- * Déploiement attendu :
- * /var/www/urbanhub/public/index.php
- * /var/www/urbanhub/.env
- */
-
 ini_set('display_errors', '0');
 error_reporting(E_ALL);
 
@@ -91,6 +80,15 @@ function formatDuration(mixed $minutes): string
     return sprintf('%d min', $mins);
 }
 
+function getPositiveInt(string $key, int $default = 1): int
+{
+    $value = filter_input(INPUT_GET, $key, FILTER_VALIDATE_INT);
+    if ($value === false || $value === null || $value < 1) {
+        return $default;
+    }
+    return $value;
+}
+
 $envPath = dirname(__DIR__) . '/.env';
 $env = loadEnv($envPath);
 
@@ -122,6 +120,17 @@ $parkings = [];
 $sessions = [];
 $personsInParking = [];
 
+$personsPage = getPositiveInt('persons_page', 1);
+$sessionsPage = getPositiveInt('sessions_page', 1);
+
+$personsPerPage = 10;
+$sessionsPerPage = 10;
+
+$totalPersons = 0;
+$totalPersonsPages = 1;
+$totalSessions = 0;
+$totalSessionsPages = 1;
+
 try {
     $dsn = sprintf(
         'mysql:host=%s;dbname=%s;charset=utf8mb4',
@@ -141,7 +150,6 @@ try {
     $pdo = new PDO($dsn, $dbUser, $dbPass, $pdoOptions);
     $dbOk = true;
 
-    // Statistiques globales
     $statsStmt = $pdo->query("
         SELECT
             (SELECT COUNT(*) FROM parkings) AS parkings,
@@ -151,7 +159,6 @@ try {
     ");
     $stats = $statsStmt->fetch() ?: $stats;
 
-    // Vue parkings enrichie
     $parkingsStmt = $pdo->query("
         SELECT
             p.id,
@@ -170,26 +177,21 @@ try {
     ");
     $parkings = $parkingsStmt->fetchAll();
 
-    // Sessions récentes
-    $sessionsStmt = $pdo->query("
-        SELECT
-            immatriculation,
-            parking,
-            address,
-            date_entree,
-            date_sortie,
-            duree_minutes,
-            type_abonnement,
-            montant,
-            statut
-        FROM v_parking_overview
-        ORDER BY date_entree DESC
-        LIMIT 25
+    // Pagination personnes présentes
+    $countPersonsStmt = $pdo->query("
+        SELECT COUNT(*)
+        FROM parking_sessions ps
+        INNER JOIN vehicles v ON v.id = ps.vehicle_id
+        INNER JOIN parkings p ON p.id = ps.parking_id
+        LEFT JOIN subscriptions s ON s.id = v.subscription_id
+        WHERE ps.status = 'active'
     ");
-    $sessions = $sessionsStmt->fetchAll();
+    $totalPersons = (int)$countPersonsStmt->fetchColumn();
+    $totalPersonsPages = max(1, (int)ceil($totalPersons / $personsPerPage));
+    $personsPage = min($personsPage, $totalPersonsPages);
+    $personsOffset = ($personsPage - 1) * $personsPerPage;
 
-    // Liste totale des personnes présentes dans les parkings
-    $personsStmt = $pdo->query("
+    $personsStmt = $pdo->prepare("
         SELECT
             v.owner_name AS personne,
             v.plate_number AS immatriculation,
@@ -203,8 +205,42 @@ try {
         LEFT JOIN subscriptions s ON s.id = v.subscription_id
         WHERE ps.status = 'active'
         ORDER BY p.name ASC, ps.entry_time DESC
+        LIMIT :limit OFFSET :offset
     ");
+    $personsStmt->bindValue(':limit', $personsPerPage, PDO::PARAM_INT);
+    $personsStmt->bindValue(':offset', $personsOffset, PDO::PARAM_INT);
+    $personsStmt->execute();
     $personsInParking = $personsStmt->fetchAll();
+
+    // Pagination sessions récentes
+    $countSessionsStmt = $pdo->query("
+        SELECT COUNT(*)
+        FROM v_parking_overview
+    ");
+    $totalSessions = (int)$countSessionsStmt->fetchColumn();
+    $totalSessionsPages = max(1, (int)ceil($totalSessions / $sessionsPerPage));
+    $sessionsPage = min($sessionsPage, $totalSessionsPages);
+    $sessionsOffset = ($sessionsPage - 1) * $sessionsPerPage;
+
+    $sessionsStmt = $pdo->prepare("
+        SELECT
+            immatriculation,
+            parking,
+            address,
+            date_entree,
+            date_sortie,
+            duree_minutes,
+            type_abonnement,
+            montant,
+            statut
+        FROM v_parking_overview
+        ORDER BY date_entree DESC
+        LIMIT :limit OFFSET :offset
+    ");
+    $sessionsStmt->bindValue(':limit', $sessionsPerPage, PDO::PARAM_INT);
+    $sessionsStmt->bindValue(':offset', $sessionsOffset, PDO::PARAM_INT);
+    $sessionsStmt->execute();
+    $sessions = $sessionsStmt->fetchAll();
 
 } catch (Throwable $e) {
     $dbError = $e->getMessage();
@@ -218,259 +254,7 @@ $appOk = true;
     <meta charset="UTF-8">
     <title>UrbanHub - Tableau de bord</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        :root {
-            --blue: #0b4f7a;
-            --green: #48a23f;
-            --red: #c62828;
-            --amber: #b26a00;
-            --bg: #f5f7fb;
-            --card: #ffffff;
-            --text: #1f2937;
-            --muted: #202020;
-            --border: #dbe2ea;
-            --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
-        }
-
-        * { box-sizing: border-box; }
-
-        body {
-            margin: 0;
-            font-family: Arial, Helvetica, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-        }
-
-        .container {
-            max-width: 1320px;
-            margin: 32px auto;
-            padding: 0 20px 40px;
-        }
-
-        .hero {
-            background: linear-gradient(135deg, var(--blue), #14679b);
-            color: #fff;
-            border-radius: 18px;
-            padding: 28px;
-            box-shadow: var(--shadow);
-            margin-bottom: 24px;
-        }
-
-        .hero-top {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 20px;
-            flex-wrap: wrap;
-        }
-
-        .hero-title {
-            display: flex;
-            align-items: center;
-            gap: 18px;
-        }
-
-        .hero-title img {
-            width: 178px;
-            height: 178px;
-            object-fit: contain;
-            background: rgba(255,255,255,0.8);
-            border-radius: 16px;
-            padding: 8px;
-        }
-
-        .hero h1 {
-            margin: 0 0 8px;
-            font-size: 2rem;
-        }
-
-        .hero p {
-            margin: 0;
-            max-width: 660px;
-            line-height: 1.5;
-            opacity: 0.96;
-        }
-
-        .instance-box {
-            background: rgba(255,255,255,0.12);
-            border: 1px solid rgba(255,255,255,0.18);
-            border-radius: 14px;
-            padding: 12px 16px;
-            min-width: 260px;
-        }
-
-        .instance-box strong {
-            display: block;
-            font-size: 1rem;
-            margin-bottom: 4px;
-        }
-
-        .meta {
-            margin-top: 18px;
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
-
-        .chip {
-            background: rgba(255,255,255,0.12);
-            border: 1px solid rgba(255,255,255,0.16);
-            padding: 8px 12px;
-            border-radius: 999px;
-            font-size: 0.92rem;
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(12, 1fr);
-            gap: 20px;
-        }
-
-        .card {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 18px;
-            box-shadow: var(--shadow);
-            overflow: hidden;
-        }
-
-        .card-header {
-            padding: 18px 20px;
-            border-bottom: 1px solid var(--border);
-            background: #f9fbfd;
-        }
-
-        .card-header h2, .card-header h3 {
-            margin: 0;
-        }
-
-        .card-body {
-            padding: 20px;
-        }
-
-        .span-12 { grid-column: span 12; }
-        .span-6 { grid-column: span 6; }
-        .span-4 { grid-column: span 4; }
-        .span-3 { grid-column: span 3; }
-
-        .status-list {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 12px;
-        }
-
-        .status-item, .kpi {
-            border: 1px solid var(--border);
-            border-radius: 14px;
-            padding: 14px;
-            background: #fff;
-        }
-
-        .status-item small,
-        .kpi small {
-            display: block;
-            color: var(--muted);
-            margin-bottom: 8px;
-        }
-
-        .status-item strong,
-        .kpi strong {
-            font-size: 1.05rem;
-        }
-
-        .badge {
-            display: inline-block;
-            padding: 6px 10px;
-            border-radius: 999px;
-            font-size: 0.88rem;
-            font-weight: bold;
-        }
-
-        .badge-ok {
-            background: #dcfce7;
-            color: #166534;
-        }
-
-        .badge-ko {
-            background: #fee2e2;
-            color: #991b1b;
-        }
-
-        .kpi-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 12px;
-        }
-
-        .kpi strong {
-            font-size: 1.35rem;
-            color: var(--blue);
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background: #fff;
-        }
-
-        thead {
-            background: var(--blue);
-            color: #fff;
-        }
-
-        th, td {
-            text-align: left;
-            padding: 12px 10px;
-            border-bottom: 1px solid #e8edf3;
-            vertical-align: top;
-            font-size: 0.95rem;
-        }
-
-        tbody tr:hover {
-            background: #f8fbff;
-        }
-
-        .muted {
-            color: var(--muted);
-        }
-
-        .tag {
-            display: inline-block;
-            padding: 5px 9px;
-            border-radius: 999px;
-            font-size: 0.84rem;
-            font-weight: bold;
-            background: #eef2ff;
-            color: #3730a3;
-        }
-
-        .tag.active {
-            background: #fff7ed;
-            color: #9a3412;
-        }
-
-        .tag.closed {
-            background: #dcfce7;
-            color: #166534;
-        }
-
-        .error-box {
-            margin-top: 12px;
-            padding: 12px 14px;
-            border-radius: 12px;
-            background: #fff1f2;
-            color: #9f1239;
-            border: 1px solid #fecdd3;
-            font-family: monospace;
-            font-size: 0.9rem;
-            overflow-x: auto;
-        }
-
-        @media (max-width: 1100px) {
-            .span-6, .span-4, .span-3 { grid-column: span 12; }
-            .status-list, .kpi-grid { grid-template-columns: 1fr; }
-        }
-    </style>
+    <link rel="stylesheet" href="affichage.css">
 </head>
 <body>
     <div class="container">
@@ -662,6 +446,19 @@ $appOk = true;
                             <?php endif; ?>
                         </tbody>
                     </table>
+
+                    <div class="pagination">
+                        <?php for ($i = 1; $i <= $totalPersonsPages; $i++): ?>
+                            <?php
+                            $query = $_GET;
+                            $query['persons_page'] = $i;
+                            $url = '?' . http_build_query($query);
+                            ?>
+                            <a href="<?= esc($url) ?>" class="<?= $i === $personsPage ? 'active-page' : '' ?>">
+                                <?= esc($i) ?>
+                            </a>
+                        <?php endfor; ?>
+                    </div>
                 </div>
             </div>
 
@@ -713,6 +510,19 @@ $appOk = true;
                             <?php endif; ?>
                         </tbody>
                     </table>
+
+                    <div class="pagination">
+                        <?php for ($i = 1; $i <= $totalSessionsPages; $i++): ?>
+                            <?php
+                            $query = $_GET;
+                            $query['sessions_page'] = $i;
+                            $url = '?' . http_build_query($query);
+                            ?>
+                            <a href="<?= esc($url) ?>" class="<?= $i === $sessionsPage ? 'active-page' : '' ?>">
+                                <?= esc($i) ?>
+                            </a>
+                        <?php endfor; ?>
+                    </div>
                 </div>
             </div>
         </section>
