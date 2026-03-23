@@ -129,8 +129,8 @@ $chartFree = [];
 $personsPage = getPositiveInt('persons_page', 1);
 $sessionsPage = getPositiveInt('sessions_page', 1);
 
-$personsPerPage = 10;
-$sessionsPerPage = 10;
+$personsPerPage = 20;
+$sessionsPerPage = 20;
 
 $totalPersons = 0;
 $totalPersonsPages = 1;
