@@ -5,7 +5,6 @@ declare(strict_types=1);
  * UrbanHub - index.php
  * Dépôt attendu :
  * php/index.php
- * php/health.php
  * php/logo.webp
  *
  * Déploiement attendu :
@@ -47,7 +46,6 @@ function loadEnv(string $path): array
 
         $key = trim(substr($line, 0, $pos));
         $value = trim(substr($line, $pos + 1));
-
         $value = trim($value, "\"'");
         $config[$key] = $value;
     }
@@ -106,6 +104,9 @@ $instanceHostname = $env['INSTANCE_HOSTNAME'] ?? gethostname() ?: php_uname('n')
 $logoPath = __DIR__ . '/logo.webp';
 $logoExists = is_file($logoPath);
 
+$rdsCaPath = '/etc/ssl/rds/global-bundle.pem';
+$rdsCaExists = is_file($rdsCaPath);
+
 $dbOk = false;
 $dbError = null;
 $pdo = null;
@@ -119,6 +120,7 @@ $stats = [
 
 $parkings = [];
 $sessions = [];
+$personsInParking = [];
 
 try {
     $dsn = sprintf(
@@ -127,12 +129,16 @@ try {
         $dbName
     );
 
-    $pdo = new PDO($dsn, $dbUser, $dbPass, [
-        PDO::MYSQL_ATTR_SSL_CA => '/etc/ssl/certs/ca-certificates.crt',
+    $pdoOptions = [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ]);
+    ];
 
+    if (defined('PDO::MYSQL_ATTR_SSL_CA') && $rdsCaExists) {
+        $pdoOptions[PDO::MYSQL_ATTR_SSL_CA] = $rdsCaPath;
+    }
+
+    $pdo = new PDO($dsn, $dbUser, $dbPass, $pdoOptions);
     $dbOk = true;
 
     // Statistiques globales
@@ -181,6 +187,24 @@ try {
         LIMIT 25
     ");
     $sessions = $sessionsStmt->fetchAll();
+
+    // Liste totale des personnes présentes dans les parkings
+    $personsStmt = $pdo->query("
+        SELECT
+            v.owner_name AS personne,
+            v.plate_number AS immatriculation,
+            p.name AS parking,
+            p.address,
+            ps.entry_time AS date_entree,
+            s.label AS type_abonnement
+        FROM parking_sessions ps
+        INNER JOIN vehicles v ON v.id = ps.vehicle_id
+        INNER JOIN parkings p ON p.id = ps.parking_id
+        LEFT JOIN subscriptions s ON s.id = v.subscription_id
+        WHERE ps.status = 'active'
+        ORDER BY p.name ASC, ps.entry_time DESC
+    ");
+    $personsInParking = $personsStmt->fetchAll();
 
 } catch (Throwable $e) {
     $dbError = $e->getMessage();
@@ -331,7 +355,7 @@ $appOk = true;
 
         .status-list {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(4, 1fr);
             gap: 12px;
         }
 
@@ -521,6 +545,10 @@ $appOk = true;
                             <small>Présence du logo</small>
                             <strong><?= badge($logoExists) ?></strong>
                         </div>
+                        <div class="status-item">
+                            <small>Bundle CA RDS AWS</small>
+                            <strong><?= badge($rdsCaExists) ?></strong>
+                        </div>
                     </div>
 
                     <?php if (!$dbOk && $dbError !== null): ?>
@@ -590,6 +618,45 @@ $appOk = true;
                                         <td><?= esc($row['nb_actives']) ?></td>
                                         <td><?= esc($row['nb_cloturees']) ?></td>
                                         <td><?= esc(formatDuration($row['duree_moyenne_minutes'])) ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card span-12">
+                <div class="card-header">
+                    <h2>Personnes actuellement présentes dans les parkings</h2>
+                    <h3 class="muted">Requête SQL : véhicules avec session active</h3>
+                </div>
+                <div class="card-body" style="padding:0;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Personne</th>
+                                <th>Immatriculation</th>
+                                <th>Parking</th>
+                                <th>Adresse</th>
+                                <th>Entrée</th>
+                                <th>Abonnement</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (count($personsInParking) === 0): ?>
+                                <tr>
+                                    <td colspan="6">Aucune personne actuellement présente.</td>
+                                </tr>
+                            <?php else: ?>
+                                <?php foreach ($personsInParking as $row): ?>
+                                    <tr>
+                                        <td><strong><?= esc($row['personne']) ?></strong></td>
+                                        <td><?= esc($row['immatriculation']) ?></td>
+                                        <td><?= esc($row['parking']) ?></td>
+                                        <td><?= esc($row['address']) ?></td>
+                                        <td><?= esc(formatDate($row['date_entree'])) ?></td>
+                                        <td><?= esc($row['type_abonnement']) ?></td>
                                     </tr>
                                 <?php endforeach; ?>
                             <?php endif; ?>
