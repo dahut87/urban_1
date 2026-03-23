@@ -16,11 +16,11 @@ REPO_PHP_PATH="${REPO_PHP_PATH:-php/index.php}"
 APP_DB_NAME="${APP_DB_NAME:-urbanhub}"
 APP_DB_USER="${APP_DB_USER:-urbanhub_app}"
 
-# Identifiants master RDS (à fournir via user data / variables / secret)
+# Identifiants master RDS
 MASTER_DB_USER="${MASTER_DB_USER:?MASTER_DB_USER must be set}"
 MASTER_DB_PASSWORD="${MASTER_DB_PASSWORD:?MASTER_DB_PASSWORD must be set}"
 
-# Région AWS (déduite via IMDSv2 sinon AWS_DEFAULT_REGION sinon eu-west-3)
+# Région AWS
 AWS_REGION="${AWS_REGION:-}"
 APP_DIR="/var/www/${APP_NAME}"
 WEB_ROOT="${APP_DIR}/public"
@@ -124,37 +124,25 @@ do
 done
 
 # =========================
-# Création BDD + user applicatif
+# Création du user applicatif uniquement
 # =========================
-log "Création de la base et de l'utilisateur applicatif"
-mysql -h "${DB_HOST}" -u "${MASTER_DB_USER}" -p"${MASTER_DB_PASSWORD}" <<EOF
-CREATE DATABASE IF NOT EXISTS \`${APP_DB_NAME}\`
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
+log "Création du compte applicatif MariaDB"
 
+mysql -h "${DB_HOST}" -u "${MASTER_DB_USER}" -p"${MASTER_DB_PASSWORD}" <<EOF
 CREATE USER IF NOT EXISTS '${APP_DB_USER}'@'%' IDENTIFIED BY '${APP_DB_PASSWORD}';
 ALTER USER '${APP_DB_USER}'@'%' IDENTIFIED BY '${APP_DB_PASSWORD}';
-GRANT ALL PRIVILEGES ON \`${APP_DB_NAME}\`.* TO '${APP_DB_USER}'@'%';
+GRANT ALL PRIVILEGES ON *.* TO '${APP_DB_USER}'@'%';
 FLUSH PRIVILEGES;
 EOF
 
 # =========================
-# Import du SQL du dépôt
+# Import du SQL du dépôt uniquement
 # =========================
-log "Préparation du fichier SQL pour import"
-TMP_SQL="/tmp/${APP_NAME}_init.sql"
-
-{
-  printf 'CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n' "${APP_DB_NAME}"
-  printf 'USE `%s`;\n' "${APP_DB_NAME}"
-  cat "${SQL_FILE}"
-} > "${TMP_SQL}"
-
-log "Import du SQL"
-mysql -h "${DB_HOST}" -u "${MASTER_DB_USER}" -p"${MASTER_DB_PASSWORD}" < "${TMP_SQL}"
+log "Import du fichier SQL du dépôt : ${SQL_FILE}"
+mysql -h "${DB_HOST}" -u "${APP_DB_USER}" -p"${APP_DB_PASSWORD}" < "${SQL_FILE}"
 
 # =========================
-# Déploiement PHP
+# Déploiement PHP du dépôt
 # =========================
 log "Déploiement du PHP"
 mkdir -p "${WEB_ROOT}"
@@ -168,7 +156,9 @@ header('Content-Type: text/plain; charset=utf-8');
 echo "OK";
 EOF
 
-# Fichier de config consommé par le PHP
+# =========================
+# Fichier de configuration pour l'application PHP
+# =========================
 cat > "${APP_DIR}/.env" <<EOF
 APP_NAME=${APP_NAME}
 DB_HOST=${DB_HOST}
@@ -178,6 +168,8 @@ DB_PASSWORD=${APP_DB_PASSWORD}
 AWS_REGION=${AWS_REGION}
 INSTANCE_HOSTNAME=$(hostname)
 EOF
+
+chown -R www-data:www-data "${APP_DIR}"
 
 # =========================
 # Apache
