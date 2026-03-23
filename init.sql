@@ -4,10 +4,7 @@ CREATE DATABASE IF NOT EXISTS urbanhub
 
 USE urbanhub;
 
-SET NAMES utf8mb4;
-
 DROP VIEW IF EXISTS v_parking_overview;
-
 DROP TABLE IF EXISTS parking_sessions;
 DROP TABLE IF EXISTS vehicles;
 DROP TABLE IF EXISTS subscriptions;
@@ -85,19 +82,31 @@ CREATE PROCEDURE seed_urbanhub()
 BEGIN
   DECLARE i INT DEFAULT 1;
   DECLARE sub_id INT;
-  DECLARE park_id INT;
-  DECLARE hh INT;
-  DECLARE mm INT;
-  DECLARE dur INT;
-  DECLARE day_offset INT;
   DECLARE plate_a CHAR(1);
   DECLARE plate_b CHAR(1);
   DECLARE plate_c CHAR(1);
   DECLARE plate_d CHAR(1);
   DECLARE owner_label VARCHAR(100);
 
-  WHILE i <= 4550 DO
+  DECLARE total_vehicles INT DEFAULT 4550;
 
+  DECLARE active_target_rep INT DEFAULT 152;
+  DECLARE active_target_gare INT DEFAULT 148;
+  DECLARE active_target_hdv INT DEFAULT 96;
+  DECLARE active_target_dussoubs INT DEFAULT 54;
+  DECLARE active_target_champ INT DEFAULT 38;
+
+  DECLARE active_total INT DEFAULT 488;
+  DECLARE parking_id_local INT;
+  DECLARE hist_parking_id INT;
+  DECLARE entry_dt DATETIME;
+  DECLARE dur INT;
+  DECLARE sub_local INT;
+
+  /* =========================
+     Création des véhicules
+     ========================= */
+  WHILE i <= total_vehicles DO
     SET sub_id =
       CASE
         WHEN MOD(i, 10) IN (1,2,3,4) THEN 1
@@ -111,7 +120,7 @@ BEGIN
     SET plate_c = CHAR(65 + MOD(i + 13, 26));
     SET plate_d = CHAR(65 + MOD(i + 19, 26));
 
-    SET owner_label = CONCAT('Usager Limoges ', LPAD(i, 3, '0'));
+    SET owner_label = CONCAT('Usager Limoges ', LPAD(i, 4, '0'));
 
     INSERT INTO vehicles (plate_number, owner_name, subscription_id)
     VALUES (
@@ -120,47 +129,146 @@ BEGIN
       sub_id
     );
 
-    SET park_id = 1 + MOD(i - 1, 5);
-    SET day_offset = MOD(i - 1, 30);
-    SET hh = 7 + MOD(i * 3, 11);
-    SET mm = MOD(i * 7, 60);
-    SET dur = 20 + MOD(i * 23, 600);
+    SET i = i + 1;
+  END WHILE;
 
-    IF MOD(i, 6) = 0 THEN
-      INSERT INTO parking_sessions (
-        vehicle_id, parking_id, entry_time, exit_time, duration_minutes, amount_due, status
-      )
-      VALUES (
-        i,
-        park_id,
-        TIMESTAMP(DATE_SUB('2026-03-30', INTERVAL day_offset DAY), MAKETIME(hh, mm, 0)),
-        NULL,
-        NULL,
-        NULL,
-        'active'
-      );
-    ELSE
-      INSERT INTO parking_sessions (
-        vehicle_id, parking_id, entry_time, exit_time, duration_minutes, amount_due, status
-      )
-      VALUES (
-        i,
-        park_id,
-        TIMESTAMP(DATE_SUB('2026-03-30', INTERVAL day_offset DAY), MAKETIME(hh, mm, 0)),
-        TIMESTAMPADD(
-          MINUTE,
-          dur,
-          TIMESTAMP(DATE_SUB('2026-03-30', INTERVAL day_offset DAY), MAKETIME(hh, mm, 0))
-        ),
-        dur,
-        CASE
-          WHEN sub_id IN (2,3) THEN 0.00
-          WHEN sub_id = 4 THEN ROUND(dur * 0.03, 2)
-          ELSE ROUND(dur * 0.05, 2)
-        END,
-        'closed'
-      );
-    END IF;
+  /* =========================
+     Sessions ACTIVES
+     Répartition inégale, sans dépasser la capacité
+     ========================= */
+
+  /* Parking République (id=1) : 152 actives / 200 */
+  SET i = 1;
+  WHILE i <= active_target_rep DO
+    INSERT INTO parking_sessions (
+      vehicle_id, parking_id, entry_time, exit_time, duration_minutes, amount_due, status
+    )
+    VALUES (
+      i,
+      1,
+      TIMESTAMP(DATE_SUB('2026-03-30', INTERVAL MOD(i, 3) DAY), MAKETIME(7 + MOD(i, 10), MOD(i * 7, 60), 0)),
+      NULL,
+      NULL,
+      NULL,
+      'active'
+    );
+    SET i = i + 1;
+  END WHILE;
+
+  /* Parking Gare Bénédictins (id=2) : 148 actives / 300 */
+  SET i = active_target_rep + 1;
+  WHILE i <= active_target_rep + active_target_gare DO
+    INSERT INTO parking_sessions (
+      vehicle_id, parking_id, entry_time, exit_time, duration_minutes, amount_due, status
+    )
+    VALUES (
+      i,
+      2,
+      TIMESTAMP(DATE_SUB('2026-03-30', INTERVAL MOD(i, 4) DAY), MAKETIME(6 + MOD(i, 12), MOD(i * 5, 60), 0)),
+      NULL,
+      NULL,
+      NULL,
+      'active'
+    );
+    SET i = i + 1;
+  END WHILE;
+
+  /* Parking Hôtel de Ville (id=3) : 96 actives / 150 */
+  SET i = active_target_rep + active_target_gare + 1;
+  WHILE i <= active_target_rep + active_target_gare + active_target_hdv DO
+    INSERT INTO parking_sessions (
+      vehicle_id, parking_id, entry_time, exit_time, duration_minutes, amount_due, status
+    )
+    VALUES (
+      i,
+      3,
+      TIMESTAMP(DATE_SUB('2026-03-30', INTERVAL MOD(i, 2) DAY), MAKETIME(8 + MOD(i, 9), MOD(i * 3, 60), 0)),
+      NULL,
+      NULL,
+      NULL,
+      'active'
+    );
+    SET i = i + 1;
+  END WHILE;
+
+  /* Parking Denis Dussoubs (id=4) : 54 actives / 120 */
+  SET i = active_target_rep + active_target_gare + active_target_hdv + 1;
+  WHILE i <= active_target_rep + active_target_gare + active_target_hdv + active_target_dussoubs DO
+    INSERT INTO parking_sessions (
+      vehicle_id, parking_id, entry_time, exit_time, duration_minutes, amount_due, status
+    )
+    VALUES (
+      i,
+      4,
+      TIMESTAMP(DATE_SUB('2026-03-30', INTERVAL MOD(i, 5) DAY), MAKETIME(9 + MOD(i, 8), MOD(i * 11, 60), 0)),
+      NULL,
+      NULL,
+      NULL,
+      'active'
+    );
+    SET i = i + 1;
+  END WHILE;
+
+  /* Parking Champ de Juillet (id=5) : 38 actives / 250 */
+  SET i = active_target_rep + active_target_gare + active_target_hdv + active_target_dussoubs + 1;
+  WHILE i <= active_total DO
+    INSERT INTO parking_sessions (
+      vehicle_id, parking_id, entry_time, exit_time, duration_minutes, amount_due, status
+    )
+    VALUES (
+      i,
+      5,
+      TIMESTAMP(DATE_SUB('2026-03-30', INTERVAL MOD(i, 6) DAY), MAKETIME(7 + MOD(i, 11), MOD(i * 13, 60), 0)),
+      NULL,
+      NULL,
+      NULL,
+      'active'
+    );
+    SET i = i + 1;
+  END WHILE;
+
+  /* =========================
+     Historique CLOTURÉ
+     Le reste des véhicules
+     Répartition inégale mais réaliste
+     ========================= */
+  SET i = active_total + 1;
+  WHILE i <= total_vehicles DO
+    SET hist_parking_id =
+      CASE
+        WHEN MOD(i, 10) IN (0,1,2) THEN 2
+        WHEN MOD(i, 10) IN (3,4) THEN 1
+        WHEN MOD(i, 10) IN (5,6) THEN 5
+        WHEN MOD(i, 10) = 7 THEN 3
+        ELSE 4
+      END;
+
+    SET dur = 20 + MOD(i * 23, 600);
+    SET sub_local = (
+      SELECT subscription_id FROM vehicles WHERE id = i
+    );
+
+    SET entry_dt = TIMESTAMP(
+      DATE_SUB('2026-03-30', INTERVAL MOD(i, 30) DAY),
+      MAKETIME(6 + MOD(i * 3, 12), MOD(i * 7, 60), 0)
+    );
+
+    INSERT INTO parking_sessions (
+      vehicle_id, parking_id, entry_time, exit_time, duration_minutes, amount_due, status
+    )
+    VALUES (
+      i,
+      hist_parking_id,
+      entry_dt,
+      TIMESTAMPADD(MINUTE, dur, entry_dt),
+      dur,
+      CASE
+        WHEN sub_local IN (2,3) THEN 0.00
+        WHEN sub_local = 4 THEN ROUND(dur * 0.03, 2)
+        ELSE ROUND(dur * 0.05, 2)
+      END,
+      'closed'
+    );
 
     SET i = i + 1;
   END WHILE;
