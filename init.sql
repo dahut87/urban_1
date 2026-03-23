@@ -96,7 +96,7 @@ BEGIN
   DECLARE plate_d CHAR(1);
   DECLARE owner_label VARCHAR(100);
 
-  WHILE i <= 650 DO
+  WHILE i <= 4550 DO
 
     SET sub_id =
       CASE
