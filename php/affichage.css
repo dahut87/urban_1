@@ -245,6 +245,29 @@ tbody tr:hover {
     overflow-x: auto;
 }
 
+.pagination {
+  padding: 16px 20px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pagination a {
+  display: inline-block;
+  padding: 8px 12px;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  text-decoration: none;
+  color: #0b4f7a;
+  background: #fff;
+}
+
+.pagination a.active-page {
+  background: #0b4f7a;
+  color: #fff;
+  border-color: #0b4f7a;
+}
+
 @media (max-width: 1100px) {
     .span-6, .span-4, .span-3 { grid-column: span 12; }
     .status-list, .kpi-grid { grid-template-columns: 1fr; }
