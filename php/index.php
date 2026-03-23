@@ -97,6 +97,8 @@ $dbName = $env['DB_NAME'] ?? 'urbanhub';
 $dbUser = $env['DB_USER'] ?? 'urbanhub_app';
 $dbPass = $env['DB_PASSWORD'] ?? '';
 $awsRegion = $env['AWS_REGION'] ?? 'eu-west-3';
+$awsAccountId = $env['AWS_ACCOUNT_ID'] ?? 'inconnu';
+$awsRdsInstanceId = $env['AWS_RDS_INSTANCE_ID'] ?? 'inconnu';
 $instanceHostname = $env['INSTANCE_HOSTNAME'] ?? gethostname() ?: php_uname('n');
 
 $logoPath = __DIR__ . '/logo.webp';
@@ -107,7 +109,6 @@ $rdsCaExists = is_file($rdsCaPath);
 
 $dbOk = false;
 $dbError = null;
-$pdo = null;
 
 $stats = [
     'parkings' => 0,
@@ -119,6 +120,11 @@ $stats = [
 $parkings = [];
 $sessions = [];
 $personsInParking = [];
+
+$chartLabels = [];
+$chartCapacity = [];
+$chartActive = [];
+$chartFree = [];
 
 $personsPage = getPositiveInt('persons_page', 1);
 $sessionsPage = getPositiveInt('sessions_page', 1);
@@ -132,11 +138,7 @@ $totalSessions = 0;
 $totalSessionsPages = 1;
 
 try {
-    $dsn = sprintf(
-        'mysql:host=%s;dbname=%s;charset=utf8mb4',
-        $dbHost,
-        $dbName
-    );
+    $dsn = sprintf('mysql:host=%s;dbname=%s;charset=utf8mb4', $dbHost, $dbName);
 
     $pdoOptions = [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -177,7 +179,17 @@ try {
     ");
     $parkings = $parkingsStmt->fetchAll();
 
-    // Pagination personnes présentes
+    foreach ($parkings as $row) {
+        $capacity = (int)$row['capacity'];
+        $active = (int)$row['nb_actives'];
+        $free = max(0, $capacity - $active);
+
+        $chartLabels[] = $row['name'];
+        $chartCapacity[] = $capacity;
+        $chartActive[] = $active;
+        $chartFree[] = $free;
+    }
+
     $countPersonsStmt = $pdo->query("
         SELECT COUNT(*)
         FROM parking_sessions ps
@@ -212,11 +224,7 @@ try {
     $personsStmt->execute();
     $personsInParking = $personsStmt->fetchAll();
 
-    // Pagination sessions récentes
-    $countSessionsStmt = $pdo->query("
-        SELECT COUNT(*)
-        FROM v_parking_overview
-    ");
+    $countSessionsStmt = $pdo->query("SELECT COUNT(*) FROM v_parking_overview");
     $totalSessions = (int)$countSessionsStmt->fetchColumn();
     $totalSessionsPages = max(1, (int)ceil($totalSessions / $sessionsPerPage));
     $sessionsPage = min($sessionsPage, $totalSessionsPages);
@@ -255,6 +263,7 @@ $appOk = true;
     <title>UrbanHub - Tableau de bord</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="affichage.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <div class="container">
@@ -288,7 +297,8 @@ $appOk = true;
                 <div class="chip">Service : UrbanHub</div>
                 <div class="chip">Base : <?= esc($dbName) ?></div>
                 <div class="chip">Hôte BDD : <?= esc($dbHost) ?></div>
-                <div class="chip">Frontend : Apache / PHP</div>
+                <div class="chip">Compte AWS : <?= esc($awsAccountId) ?></div>
+                <div class="chip">Instance RDS : <?= esc($awsRdsInstanceId) ?></div>
             </div>
         </section>
 
@@ -304,8 +314,8 @@ $appOk = true;
                         déployée sur AWS derrière un load balancer, avec une base de données distante.
                     </p>
                     <p>
-                        Les tableaux ci-dessous reposent sur des requêtes SQL exécutées en direct
-                        sur la base MariaDB afin d’afficher les parkings, les sessions actives,
+                        Les tableaux et graphiques ci-dessous reposent sur des requêtes SQL exécutées
+                        en direct sur la base MariaDB afin d’afficher les parkings, les sessions actives,
                         l’historique récent et la santé globale des composants.
                     </p>
                 </div>
@@ -369,6 +379,16 @@ $appOk = true;
 
             <div class="card span-12">
                 <div class="card-header">
+                    <h2>Occupation des parkings</h2>
+                    <h3 class="muted">Graphique : capacité, occupation active et places restantes</h3>
+                </div>
+                <div class="card-body">
+                    <canvas id="parkingChart" height="110"></canvas>
+                </div>
+            </div>
+
+            <div class="card span-12">
+                <div class="card-header">
                     <h2>État des parkings</h2>
                     <h3 class="muted">Requête SQL : agrégation par parking</h3>
                 </div>
@@ -388,9 +408,7 @@ $appOk = true;
                         </thead>
                         <tbody>
                             <?php if (count($parkings) === 0): ?>
-                                <tr>
-                                    <td colspan="8">Aucune donnée disponible.</td>
-                                </tr>
+                                <tr><td colspan="8">Aucune donnée disponible.</td></tr>
                             <?php else: ?>
                                 <?php foreach ($parkings as $row): ?>
                                     <tr>
@@ -410,7 +428,7 @@ $appOk = true;
                 </div>
             </div>
 
-            <div class="card span-12">
+            <div class="card span-12" id="persons-section">
                 <div class="card-header">
                     <h2>Personnes actuellement présentes dans les parkings</h2>
                     <h3 class="muted">Requête SQL : véhicules avec session active</h3>
@@ -429,9 +447,7 @@ $appOk = true;
                         </thead>
                         <tbody>
                             <?php if (count($personsInParking) === 0): ?>
-                                <tr>
-                                    <td colspan="6">Aucune personne actuellement présente.</td>
-                                </tr>
+                                <tr><td colspan="6">Aucune personne actuellement présente.</td></tr>
                             <?php else: ?>
                                 <?php foreach ($personsInParking as $row): ?>
                                     <tr>
@@ -452,7 +468,7 @@ $appOk = true;
                             <?php
                             $query = $_GET;
                             $query['persons_page'] = $i;
-                            $url = '?' . http_build_query($query);
+                            $url = '?' . http_build_query($query) . '#persons-section';
                             ?>
                             <a href="<?= esc($url) ?>" class="<?= $i === $personsPage ? 'active-page' : '' ?>">
                                 <?= esc($i) ?>
@@ -462,7 +478,7 @@ $appOk = true;
                 </div>
             </div>
 
-            <div class="card span-12">
+            <div class="card span-12" id="sessions-section">
                 <div class="card-header">
                     <h2>Sessions récentes</h2>
                     <h3 class="muted">Requête SQL : vue applicative v_parking_overview</h3>
@@ -484,9 +500,7 @@ $appOk = true;
                         </thead>
                         <tbody>
                             <?php if (count($sessions) === 0): ?>
-                                <tr>
-                                    <td colspan="9">Aucune session disponible.</td>
-                                </tr>
+                                <tr><td colspan="9">Aucune session disponible.</td></tr>
                             <?php else: ?>
                                 <?php foreach ($sessions as $row): ?>
                                     <tr>
@@ -497,14 +511,8 @@ $appOk = true;
                                         <td><?= esc(formatDate($row['date_sortie'])) ?></td>
                                         <td><?= esc(formatDuration($row['duree_minutes'])) ?></td>
                                         <td><?= esc($row['type_abonnement']) ?></td>
-                                        <td>
-                                            <?= $row['montant'] !== null ? esc(number_format((float)$row['montant'], 2, ',', ' ')) . ' €' : '—' ?>
-                                        </td>
-                                        <td>
-                                            <span class="tag <?= esc((string)$row['statut']) ?>">
-                                                <?= esc($row['statut']) ?>
-                                            </span>
-                                        </td>
+                                        <td><?= $row['montant'] !== null ? esc(number_format((float)$row['montant'], 2, ',', ' ')) . ' €' : '—' ?></td>
+                                        <td><span class="tag <?= esc((string)$row['statut']) ?>"><?= esc($row['statut']) ?></span></td>
                                     </tr>
                                 <?php endforeach; ?>
                             <?php endif; ?>
@@ -516,7 +524,7 @@ $appOk = true;
                             <?php
                             $query = $_GET;
                             $query['sessions_page'] = $i;
-                            $url = '?' . http_build_query($query);
+                            $url = '?' . http_build_query($query) . '#sessions-section';
                             ?>
                             <a href="<?= esc($url) ?>" class="<?= $i === $sessionsPage ? 'active-page' : '' ?>">
                                 <?= esc($i) ?>
@@ -527,5 +535,46 @@ $appOk = true;
             </div>
         </section>
     </div>
+
+    <script>
+        const ctx = document.getElementById('parkingChart');
+
+        if (ctx) {
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: <?= json_encode($chartLabels, JSON_UNESCAPED_UNICODE) ?>,
+                    datasets: [
+                        {
+                            label: 'Capacité',
+                            data: <?= json_encode($chartCapacity) ?>
+                        },
+                        {
+                            label: 'Occupées',
+                            data: <?= json_encode($chartActive) ?>
+                        },
+                        {
+                            label: 'Restantes',
+                            data: <?= json_encode($chartFree) ?>
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+    </script>
 </body>
 </html>
