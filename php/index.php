@@ -128,6 +128,7 @@ try {
     );
 
     $pdo = new PDO($dsn, $dbUser, $dbPass, [
+        PDO::MYSQL_ATTR_SSL_CA => '/etc/ssl/certs/ca-certificates.crt',
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]);
@@ -202,7 +203,7 @@ $appOk = true;
             --bg: #f5f7fb;
             --card: #ffffff;
             --text: #1f2937;
-            --muted: #6b7280;
+            --muted: #202020;
             --border: #dbe2ea;
             --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
         }
@@ -246,10 +247,10 @@ $appOk = true;
         }
 
         .hero-title img {
-            width: 78px;
-            height: 78px;
+            width: 178px;
+            height: 178px;
             object-fit: contain;
-            background: rgba(255,255,255,0.08);
+            background: rgba(255,255,255,0.8);
             border-radius: 16px;
             padding: 8px;
         }
@@ -261,7 +262,7 @@ $appOk = true;
 
         .hero p {
             margin: 0;
-            max-width: 760px;
+            max-width: 660px;
             line-height: 1.5;
             opacity: 0.96;
         }
