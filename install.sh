@@ -5,7 +5,7 @@ set -euo pipefail
 # Configuration
 # =========================
 APP_NAME="${APP_NAME:-urbanhub}"
-REPO_URL="${REPO_URL:-https://694908155a9017fd04e12e9e684af12ea321694f@gitea.newkube.ia86.cc/Nicolas_Horde/Formation_Cloud_devoir1.git}"
+REPO_URL="${REPO_URL:-https://gitea.newkube.ia86.cc/Nicolas_Horde/Formation_Cloud_devoir1.git}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
 
 # Chemins attendus dans le dépôt
