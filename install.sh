@@ -59,28 +59,6 @@ ensure_packages() {
 }
 
 # =========================
-# Détection région AWS
-# =========================
-if [[ -z "${AWS_REGION}" ]]; then
-  TOKEN="$(curl -s -m 3 -X PUT "http://169.254.169.254/latest/api/token" \
-    -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
-  if [[ -n "${TOKEN}" ]]; then
-    IID_DOC="$(curl -s -m 3 -H "X-aws-ec2-metadata-token: ${TOKEN}" \
-      http://169.254.169.254/latest/dynamic/instance-identity/document || true)"
-    AWS_REGION="$(printf '%s' "${IID_DOC}" | awk -F\" '/region/ {print $4; exit}')"
-  fi
-fi
-
-AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query 'Account' --output text)"
-RDS_INSTANCE_ID="$(aws rds describe-db-instances \
-  --region "${AWS_REGION}" \
-  --query "DBInstances[?DBInstanceStatus=='available'].[DBInstanceIdentifier]" \
-  --output text | awk 'NF {print $1; exit}')"
-
-AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-eu-west-3}}"
-export AWS_DEFAULT_REGION="${AWS_REGION}"
-
-# =========================
 # Paquets système
 # =========================
 ensure_packages \
@@ -116,6 +94,28 @@ else
   cd /
   rm -rf "$TMP_DIR"
 fi
+
+# =========================
+# Détection région AWS
+# =========================
+if [[ -z "${AWS_REGION}" ]]; then
+  TOKEN="$(curl -s -m 3 -X PUT "http://169.254.169.254/latest/api/token" \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
+  if [[ -n "${TOKEN}" ]]; then
+    IID_DOC="$(curl -s -m 3 -H "X-aws-ec2-metadata-token: ${TOKEN}" \
+      http://169.254.169.254/latest/dynamic/instance-identity/document || true)"
+    AWS_REGION="$(printf '%s' "${IID_DOC}" | awk -F\" '/region/ {print $4; exit}')"
+  fi
+fi
+
+AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query 'Account' --output text)"
+RDS_INSTANCE_ID="$(aws rds describe-db-instances \
+  --region "${AWS_REGION}" \
+  --query "DBInstances[?DBInstanceStatus=='available'].[DBInstanceIdentifier]" \
+  --output text | awk 'NF {print $1; exit}')"
+
+AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-eu-west-3}}"
+export AWS_DEFAULT_REGION="${AWS_REGION}"
 
 # =========================
 # Vérification credentials AWS
