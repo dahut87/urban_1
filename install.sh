@@ -136,26 +136,29 @@ DB_HOST="$(
     --query "DBInstances[?DBInstanceStatus=='available' && Endpoint.Address!=null].[Endpoint.Address]" \
     --output text | awk 'NF {print $1; exit}'
 )"
-
 if [[ -z "${DB_HOST}" || "${DB_HOST}" == "None" ]]; then
   echo "Aucune instance RDS disponible trouvée dans ${AWS_REGION}" >&2
   exit 1
 fi
-
 log "Endpoint RDS sélectionné : ${DB_HOST}"
 
 # =========================
-# Mot de passe random pour l'utilisateur applicatif
+# Mot de passe déterministe pour l'utilisateur applicatif
 # =========================
 if [[ -f "${APP_DIR}/.app_db_password" ]]; then
   APP_DB_PASSWORD="$(sudo cat "${APP_DIR}/.app_db_password")"
-  log "Mot de passe applicatif réutilisé"
+  log "Mot de passe applicatif réutilisé depuis le disque"
 else
-  APP_DB_PASSWORD="$(openssl rand -base64 24 | tr -d '\n' | tr '/+' 'AZ')"
   sudo mkdir -p "${APP_DIR}"
+  APP_DB_PASSWORD="$(
+    printf '%s' "${APP_NAME}|${APP_DB_NAME}|${APP_DB_USER}|${DB_HOST}|urbanhub-v1" \
+      | sha256sum \
+      | awk '{print $1}' \
+      | cut -c1-32
+  )!Db9"
   printf '%s' "${APP_DB_PASSWORD}" | sudo tee "${APP_DIR}/.app_db_password" >/dev/null
   sudo chmod 600 "${APP_DIR}/.app_db_password"
-  log "Mot de passe applicatif généré"
+  log "Mot de passe applicatif déterministe généré"
 fi
 
 # =========================
